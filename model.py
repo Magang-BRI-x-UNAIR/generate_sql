@@ -10,12 +10,12 @@ class SqlGeneratorModel:
         self.source_path = source_filepath
         self.baseline_path = baseline_filepath
         self.output_sql_file = 'generated_sql_script.sql'
-        self._col_source_rm = 'PN Relationship Officer'
-        self._col_source_rekening = 'account number'
-        self._col_source_cif = 'ciff no'
-        self._col_source_nama_klien = 'short name'
+        self._col_source_rm = 'pn_relationship_officer'
+        self._col_source_rekening = 'account_number'
+        self._col_source_cif = 'ciff_no'
+        self._col_source_nama_klien = 'short_name'
         self._col_source_balance = 'balance'
-        self._col_source_avail_balance = 'available balance'
+        self._col_source_avail_balance = 'available_balance'
         self._col_source_currency = 'curr code'
         self._col_source_prod_code = 'prod code'
         self._col_date = 'periode'
