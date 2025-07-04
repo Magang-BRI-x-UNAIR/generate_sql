@@ -332,63 +332,7 @@ class SqlGeneratorModel:
                             f"(SELECT id FROM universal_bankers WHERE nip = '{baseline_pn}'), "
                             f"(SELECT id FROM account_products WHERE code = '{prod_code}'), "
                             f"'{rekening}', {current_balance}, {avail_balance}, '{currency}', 'active', NOW(), NOW(), NOW());"
-                        )
-                        
-                        # Create transaction
-                        transaction_date = 'NOW()'
-                        if self._col_date in df_source.columns:
-                            periode_value = self._clean_string(row[self._col_date])
-                            if periode_value and periode_value != 'nan':
-                                try:
-                                    # Handle different date formats
-                                    date_str = periode_value.strip()
-                                    
-                                    # Try different date formats
-                                    date_formats = [
-                                        "%Y-%m-%d", 
-                                        "%d/%m/%Y",      
-                                        "%Y/%m/%d",     
-                                        "%d-%m-%Y",      
-                                        "%Y-%m-%d %H:%M:%S",
-                                        "%d/%m/%Y %H:%M:%S"
-                                    ]
-                                    
-                                    parsed_date = None
-                                    for fmt in date_formats:
-                                        try:
-                                            parsed_date = datetime.strptime(date_str, fmt)
-                                            break
-                                        except ValueError:
-                                            continue
-                                    
-                                    if parsed_date:
-                                        # Format to MySQL date format (YYYY-MM-DD)
-                                        transaction_date = f"'{parsed_date.strftime('%Y-%m-%d')}'"
-                                    else:
-                                        # If no format matches, try to extract just the date part
-                                        if len(date_str) >= 10:
-                                            # Extract first 10 characters if it looks like a date
-                                            date_part = date_str[:10]
-                                            if date_part.count('-') == 2:
-                                                # Validate the date format YYYY-MM-DD
-                                                try:
-                                                    datetime.strptime(date_part, "%Y-%m-%d")
-                                                    transaction_date = f"'{date_part}'"
-                                                except ValueError:
-                                                    transaction_date = 'NOW()'
-                                            else:
-                                                transaction_date = 'NOW()'
-                                        else:
-                                            transaction_date = 'NOW()'
-                                except Exception as e:
-                                    print(f"   -> Warning: Error parsing date '{periode_value}': {e}")
-                                    transaction_date = 'NOW()'
-
-                        transaction_queries.append(
-                            f"INSERT INTO account_transactions (account_id, balance, date, created_at, updated_at) VALUES "
-                            f"((SELECT id FROM accounts WHERE account_number = '{rekening}'), "
-                            f"{current_balance}, {transaction_date}, NOW(), NOW());"
-                        )
+                        )                                           
                     
                     valid_records += 1
                     
