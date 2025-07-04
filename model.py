@@ -26,6 +26,12 @@ class SqlGeneratorModel:
         self.branch_address = 'BRI Cabang Surabaya Kaliasin, Gd. BRI Tower, No. 122-138, Jl. Basuki Rahmat, Embong Kaliasin, Kec. Genteng, Surabaya, Jawa Timur 60135'
 
     def _clean_balance(self, balance_str):
+        # Handle Series case
+        if isinstance(balance_str, pd.Series):
+            if balance_str.empty:
+                return 0.0
+            balance_str = balance_str.iloc[0]  # Get first value if Series
+        
         if pd.isna(balance_str):
             return 0.0
         if isinstance(balance_str, str):
@@ -33,11 +39,23 @@ class SqlGeneratorModel:
         return float(balance_str)
     
     def _clean_string(self, input_str):
+        # Handle Series case
+        if isinstance(input_str, pd.Series):
+            if input_str.empty:
+                return ""
+            input_str = input_str.iloc[0]  # Get first value if Series
+        
         if pd.isna(input_str):
             return ""
         return str(input_str).replace("'", "''").strip()
 
     def _extract_nip(self, rm_string):
+        # Handle Series case
+        if isinstance(rm_string, pd.Series):
+            if rm_string.empty:
+                return None
+            rm_string = rm_string.iloc[0]  # Get first value if Series
+        
         if pd.isna(rm_string) or str(rm_string).strip() == '-':
             return None
         
@@ -54,6 +72,12 @@ class SqlGeneratorModel:
 
     def _safe_lower(self, value):
         try:
+            # Handle Series case
+            if isinstance(value, pd.Series):
+                if value.empty:
+                    return ""
+                value = value.iloc[0]  # Get first value if Series
+            
             if pd.isna(value):
                 return ""
             return str(value).lower()
@@ -111,12 +135,14 @@ class SqlGeneratorModel:
             print(f"   -> Source columns: {df_source.columns.tolist()}")
             print(f"   -> Baseline columns: {df_baseline.columns.tolist()}")
             
+            # Normalize column names to lowercase
             df_source.columns = df_source.columns.astype(str)
             df_baseline.columns = df_baseline.columns.astype(str)
             
             df_source.columns = [self._safe_lower(col) for col in df_source.columns]
             df_baseline.columns = [self._safe_lower(col) for col in df_baseline.columns]
             
+            # Map columns
             col_mapping_source = {
                 self._safe_lower(col): col for col in df_source.columns
             }
@@ -155,224 +181,244 @@ class SqlGeneratorModel:
             print(f"   -> Mapped source columns: {self._col_source_rekening}, {self._col_source_rm}, {self._col_source_cif}")
             print(f"   -> Mapped baseline columns: {self._col_baseline_rekening}, {self._col_baseline_pn}, {self._col_baseline_nama_rm}")
             
-            # Check for missing columns
-            missing_source_cols = [col for col, attr in source_columns.items() 
-                                if getattr(self, col) not in df_source.columns]
-            if missing_source_cols:
-                print(f"   -> Warning: Missing source columns: {missing_source_cols}")
-                
-            missing_baseline_cols = [col for col, attr in baseline_columns.items() 
-                                  if getattr(self, col) not in df_baseline.columns]
-            if missing_baseline_cols:
-                print(f"   -> Warning: Missing baseline columns: {missing_baseline_cols}")
-            
-            # Clean account numbers
+            # Clean account numbers - remove decimals
             if self._col_source_rekening in df_source.columns:
                 df_source[self._col_source_rekening] = df_source[self._col_source_rekening].astype(str).str.split('.').str[0]
             
             if self._col_baseline_rekening in df_baseline.columns:
                 df_baseline[self._col_baseline_rekening] = df_baseline[self._col_baseline_rekening].astype(str).str.split('.').str[0]
 
+            # Initialize SQL queries
             all_queries = ["-- Skrip SQL DML Dihasilkan oleh SqlGeneratorModel --\n"]
             all_queries.append("-- Blok 0: Membuat Branch --")
             all_queries.append(f"INSERT INTO branches (name, address, created_at, updated_at) VALUES ('{self.branch_name}', '{self.branch_address}', NOW(), NOW());")
             all_queries.append("SET @branch_id = LAST_INSERT_ID();")
 
-            print("[Tahap 2] Menjalankan aturan untuk 'universal_bankers'...")
-            if self._col_baseline_pn in df_baseline.columns and self._col_baseline_nama_rm in df_baseline.columns:
-                df_baseline.dropna(subset=[self._col_baseline_pn, self._col_baseline_nama_rm], inplace=True)
-                unique_bankers = df_baseline[[self._col_baseline_pn, self._col_baseline_nama_rm]].drop_duplicates()
-                
-                valid_pn_values = set(df_baseline[self._col_baseline_pn].astype(str).str.strip())
-                print(f"   -> Valid PN values from baseline: {valid_pn_values}")
-                
-                all_queries.append("\n-- Blok 1: Membuat Universal Bankers (RM) --")
-                for _, row in unique_bankers.iterrows():
-                    pn = self._clean_string(row[self._col_baseline_pn])
-                    nama_rm = self._clean_string(row[self._col_baseline_nama_rm])
-                    all_queries.append(f"INSERT IGNORE INTO universal_bankers (nip, name, branch_id, created_at, updated_at) VALUES ('{pn}', '{nama_rm}', @branch_id, NOW(), NOW());")
-            else:
-                print(f"   -> Warning: Couldn't process universal bankers due to missing columns")
-                all_queries.append("-- Warning: Couldn't process universal bankers due to missing columns")
-                valid_pn_values = set()
+            print("[Tahap 2] Membuat 6 Universal Bankers...")
             
-            print("[Tahap 3] Menjalankan aturan untuk 'account_products'...")
+            # Hardcode 6 Universal Bankers
+            universal_bankers = [
+                {'nip': '00332299', 'name': 'Rino Arya Pradana'},
+                {'nip': '00332936', 'name': 'Mutiara Purwaning Rahayu'},
+                {'nip': '00350816', 'name': 'Arini Rahmanisa'},
+                {'nip': '00364289', 'name': 'Vika Yulia Widiarsih'},
+                {'nip': '00351323', 'name': 'Enrico Fadlurahman'},
+                {'nip': '00347741', 'name': 'Ollyvia Aulia Rahmah'}
+            ]
+            
+            # Create set of valid NIPs
+            valid_nips = set()
+            
+            all_queries.append("\n-- Blok 1: Membuat Universal Bankers (RM) --")
+            for banker in universal_bankers:
+                nip = banker['nip']
+                name = banker['name']
+                valid_nips.add(nip)
+                all_queries.append(f"INSERT IGNORE INTO universal_bankers (nip, name, branch_id, created_at, updated_at) VALUES ('{nip}', '{name}', @branch_id, NOW(), NOW());")
+                print(f"   -> Added banker: {nip} - {name}")
+            
+            print(f"   -> Total UB created: {len(universal_bankers)}")
+            print(f"   -> Valid NIPs: {valid_nips}")
+
+            print("[Tahap 3] Membuat Account Products dari data source...")
             if self._col_source_prod_code in df_source.columns:
-                df_source.dropna(subset=[self._col_source_prod_code], inplace=True)
-                unique_products = df_source[[self._col_source_prod_code]].drop_duplicates()
+                df_source_clean = df_source.dropna(subset=[self._col_source_prod_code])
+                unique_products = df_source_clean[[self._col_source_prod_code]].drop_duplicates()
 
                 all_queries.append("\n-- Blok 2: Membuat Account Products --")
                 for _, row in unique_products.iterrows():
                     prod_code = self._clean_string(row[self._col_source_prod_code])
-                    all_queries.append(f"INSERT IGNORE INTO account_products (code, name, created_at, updated_at) VALUES ('{prod_code}', 'Produk {prod_code}', NOW(), NOW());")
+                    if prod_code:
+                        all_queries.append(f"INSERT IGNORE INTO account_products (code, name, created_at, updated_at) VALUES ('{prod_code}', 'Produk {prod_code}', NOW(), NOW());")
             else:
-                print(f"   -> Warning: Couldn't process account products due to missing column: {self._col_source_prod_code}")
-                all_queries.append("-- Warning: Couldn't process account products due to missing product code column")
+                print(f"   -> Warning: Product code column not found in source")
+                all_queries.append("-- Warning: Couldn't create account products due to missing column")
 
-            print("[Tahap 4] Membersihkan dan memvalidasi data...")
+            print("[Tahap 4] Memproses data DI dengan validasi baseline...")
+            
+            # Create baseline lookup for faster checking
+            baseline_accounts = set()
+            baseline_pn_mapping = {}
+            
+            if self._col_baseline_rekening in df_baseline.columns and self._col_baseline_pn in df_baseline.columns:
+                for _, row in df_baseline.iterrows():
+                    try:
+                        rekening = self._clean_string(row[self._col_baseline_rekening])
+                        pn = self._clean_string(row[self._col_baseline_pn])
+                        if rekening and pn:
+                            baseline_accounts.add(rekening)
+                            baseline_pn_mapping[rekening] = pn
+                    except:
+                        continue
+            
+            print(f"   -> Baseline accounts loaded: {len(baseline_accounts)}")
+            
+            # Process source data
+            processed_clients = set()
             processed_accounts = set()
-            if self._col_source_rm in df_source.columns:
-                df_source = df_source[~((df_source[self._col_source_rm] == '-') | 
-                                      (df_source[self._col_source_rm].isna()) | 
-                                      (df_source[self._col_source_rm].astype(str).str.strip() == ''))]
-                
-                df_source['nip_cleaned'] = df_source[self._col_source_rm].apply(self._extract_nip)
-                
-                df_source_with_rm = df_source.dropna(subset=['nip_cleaned'])
-                
-                df_source_with_rm = df_source_with_rm[df_source_with_rm['nip_cleaned'].isin(valid_pn_values)]
-                
-                print(f"   -> Data dengan RM valid yang ada di baseline: {len(df_source_with_rm)} dari {len(df_source)}")
-                
-                print("[Tahap 5] Menjalankan validasi dengan baseline...")
-                if self._col_source_rekening in df_source_with_rm.columns and self._col_baseline_rekening in df_baseline.columns:
-                    validated_df = pd.merge(
-                        df_source_with_rm, 
-                        df_baseline, 
-                        left_on=self._col_source_rekening,
-                        right_on=self._col_baseline_rekening,
-                        how='inner',
-                        suffixes=('', '_baseline')
-                    )
-                    
-                    print(f"   -> Model menemukan {len(validated_df)} data valid dari {len(df_source_with_rm)} setelah dicocokkan dengan baseline")
-
-                    all_queries.append("\n-- Blok 3: Membuat Clients (Nasabah) --")
-                    
-                    if not validated_df.empty:
-                        required_cols = [self._col_source_cif, self._col_source_nama_klien]
-                        if all(col in validated_df.columns for col in required_cols):
-                            unique_clients = validated_df[[self._col_source_cif, self._col_source_nama_klien]].drop_duplicates()
-                            
-                            client_queries = []
-                            for _, row in unique_clients.iterrows():
-                                cif = self._clean_string(row[self._col_source_cif])
-                                client_name = self._clean_string(row[self._col_source_nama_klien])
-                                client_queries.append(f"INSERT IGNORE INTO clients (cif, name, status, joined_at, created_at, updated_at) VALUES ('{cif}', '{client_name}', 'active', NOW(), NOW(), NOW());")
-                            
-                            all_queries.append("\n".join(client_queries))
-                        else:
-                            all_queries.append("-- Tidak bisa membuat clients karena kolom yang diperlukan tidak ditemukan")
-                            print(f"   -> Warning: Couldn't create clients due to missing columns")
-                        
-                        all_queries.append("\n-- Blok 4: Membuat Accounts (Rekening) --")
-                        
-                        required_acc_cols = [self._col_source_cif, 'nip_cleaned', self._col_source_prod_code, 
-                                             self._col_source_rekening, self._col_source_currency]
-                        
-                        if all(col in validated_df.columns for col in required_acc_cols):
-                            processed_accounts = set()
-                            account_queries = []
-                            
-                            for _, row in validated_df.iterrows():
-                                rekening = self._clean_string(row[self._col_source_rekening])
-                                
-                                if rekening in processed_accounts:
-                                    continue
-                                    
-                                processed_accounts.add(rekening)
-                                
-                                cif = self._clean_string(row[self._col_source_cif])
-                                nip = self._clean_string(row['nip_cleaned'])
-                                prod_code = self._clean_string(row[self._col_source_prod_code])
-                                currency = self._clean_string(row[self._col_source_currency])
-                                
-                                try:
-                                    if self._col_source_balance in validated_df.columns:
-                                        current_balance = self._clean_balance(row[self._col_source_balance])
-                                    else:
-                                        current_balance = 0
-                                        
-                                    if self._col_source_avail_balance in validated_df.columns:
-                                        avail_balance = self._clean_balance(row[self._col_source_avail_balance])
-                                    else:
-                                        avail_balance = 0
-                                except Exception as e:
-                                    print(f"   -> Kesalahan memproses saldo untuk rekening {rekening}: {e}")
-                                    current_balance = 0
-                                    avail_balance = 0
-                                
-                                account_queries.append(
-                                    f"INSERT IGNORE INTO accounts (client_id, universal_banker_id, account_product_id, account_number, current_balance, available_balance, currency, status, opened_at, created_at, updated_at) VALUES "
-                                    f"((SELECT id FROM clients WHERE cif = '{cif}'), "
-                                    f"((SELECT id FROM universal_bankers WHERE nip = '{nip}')), "
-                                    f"((SELECT id FROM account_products WHERE code = '{prod_code}')), "
-                                    f"'{rekening}', {current_balance}, {avail_balance}, '{currency}', 'active', NOW(), NOW(), NOW());"
-                                )
-                            
-                            all_queries.append("\n".join(account_queries))
-                        else:
-                            all_queries.append("-- Tidak bisa membuat accounts karena kolom yang diperlukan tidak ditemukan")
-                            missing_cols = [col for col in required_acc_cols if col not in validated_df.columns]
-                            print(f"   -> Warning: Couldn't create accounts due to missing columns: {missing_cols}")
-                    else:
-                        all_queries.append("-- Tidak ada data valid untuk pembuatan Clients")
-                        all_queries.append("\n-- Tidak ada data valid untuk pembuatan Accounts")
-                        print("   -> No validated data found")
-                    
-                    # Fixed Account Transactions section
-                    all_queries.append("\n-- Blok 5: Membuat Account Transactions --")
-                    transaction_queries = []
-                    
-                    # Check if date column exists
-                    has_date = self._col_date in validated_df.columns
-                    default_date = datetime.now().strftime("%Y-%m-%d")
-                    
-                    for _, row in validated_df.iterrows():
-                        rekening = self._clean_string(row[self._col_source_rekening])
-                        
-                        # Skip if account wasn't processed earlier
-                        if rekening not in processed_accounts:
+            client_queries = []
+            account_queries = []
+            transaction_queries = []
+            
+            all_queries.append("\n-- Blok 3: Membuat Clients (Nasabah) --")
+            all_queries.append("\n-- Blok 4: Membuat Accounts (Rekening) --")
+            all_queries.append("\n-- Blok 5: Membuat Account Transactions --")
+            
+            valid_records = 0
+            skipped_records = 0
+            
+            for _, row in df_source.iterrows():
+                try:
+                    # Check if pn_relationship_officer is not empty
+                    if self._col_source_rm in df_source.columns:
+                        pn_rm = self._clean_string(row[self._col_source_rm])
+                        if not pn_rm or pn_rm == '' or pn_rm == 'nan':
+                            skipped_records += 1
                             continue
-                            
-                        try:
-                            if has_date:
-                                date_str = self._clean_string(row[self._col_date])
-                                if not date_str:
-                                    date = default_date
-                                else:
-                                    try:
-                                        for fmt in ["%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"]:
-                                            try:
-                                                date = datetime.strptime(date_str, fmt).strftime("%Y-%m-%d")
-                                                break
-                                            except ValueError:
-                                                continue
-                                        else: 
-                                            date = default_date
-                                    except Exception:
-                                        date = default_date
-                            else:
-                                date = default_date
-                                
-                            if self._col_source_balance in validated_df.columns:
-                                current_balance = self._clean_balance(row[self._col_source_balance])
-                            else:
-                                current_balance = 0
-                        except Exception as e:
-                            print(f"   -> Kesalahan memproses saldo untuk transaksi rekening {rekening}: {e}")
-                            current_balance = 0
-                            date = default_date
+                    
+                    # Get account number
+                    if self._col_source_rekening not in df_source.columns:
+                        skipped_records += 1
+                        continue
                         
+                    rekening = self._clean_string(row[self._col_source_rekening])
+                    if not rekening:
+                        skipped_records += 1
+                        continue
+                    
+                    # Check if account exists in baseline
+                    if rekening not in baseline_accounts:
+                        skipped_records += 1
+                        continue
+                    
+                    # Get PN from baseline
+                    baseline_pn = baseline_pn_mapping.get(rekening, '')
+                    if baseline_pn not in valid_nips:
+                        print(f"   -> Warning: PN {baseline_pn} for account {rekening} not in valid NIPs")
+                        skipped_records += 1
+                        continue
+                    
+                    # Get required fields
+                    cif = self._clean_string(row[self._col_source_cif]) if self._col_source_cif in df_source.columns else ''
+                    nama_klien = self._clean_string(row[self._col_source_nama_klien]) if self._col_source_nama_klien in df_source.columns else ''
+                    prod_code = self._clean_string(row[self._col_source_prod_code]) if self._col_source_prod_code in df_source.columns else ''
+                    currency = self._clean_string(row[self._col_source_currency]) if self._col_source_currency in df_source.columns else 'IDR'
+                    
+                    if not all([cif, nama_klien, prod_code]):
+                        skipped_records += 1
+                        continue
+                    
+                    # Create client (if not already processed)
+                    if cif not in processed_clients:
+                        processed_clients.add(cif)
+                        client_queries.append(f"INSERT IGNORE INTO clients (cif, name, status, joined_at, created_at, updated_at) VALUES ('{cif}', '{nama_klien}', 'active', NOW(), NOW(), NOW());")
+                    
+                    # Create account (if not already processed)
+                    if rekening not in processed_accounts:
+                        processed_accounts.add(rekening)
+                        
+                        # Get balances
+                        current_balance = 0
+                        avail_balance = 0
+                        
+                        if self._col_source_balance in df_source.columns:
+                            current_balance = self._clean_balance(row[self._col_source_balance])
+                        if self._col_source_avail_balance in df_source.columns:
+                            avail_balance = self._clean_balance(row[self._col_source_avail_balance])
+                        
+                        account_queries.append(
+                            f"INSERT IGNORE INTO accounts (client_id, universal_banker_id, account_product_id, account_number, current_balance, available_balance, currency, status, opened_at, created_at, updated_at) VALUES "
+                            f"((SELECT id FROM clients WHERE cif = '{cif}'), "
+                            f"(SELECT id FROM universal_bankers WHERE nip = '{baseline_pn}'), "
+                            f"(SELECT id FROM account_products WHERE code = '{prod_code}'), "
+                            f"'{rekening}', {current_balance}, {avail_balance}, '{currency}', 'active', NOW(), NOW(), NOW());"
+                        )
+                        
+                        # Create transaction
+                        transaction_date = 'NOW()'
+                        if self._col_date in df_source.columns:
+                            periode_value = self._clean_string(row[self._col_date])
+                            if periode_value and periode_value != 'nan':
+                                try:
+                                    # Handle different date formats
+                                    date_str = periode_value.strip()
+                                    
+                                    # Try different date formats
+                                    date_formats = [
+                                        "%Y-%m-%d", 
+                                        "%d/%m/%Y",      
+                                        "%Y/%m/%d",     
+                                        "%d-%m-%Y",      
+                                        "%Y-%m-%d %H:%M:%S",
+                                        "%d/%m/%Y %H:%M:%S"
+                                    ]
+                                    
+                                    parsed_date = None
+                                    for fmt in date_formats:
+                                        try:
+                                            parsed_date = datetime.strptime(date_str, fmt)
+                                            break
+                                        except ValueError:
+                                            continue
+                                    
+                                    if parsed_date:
+                                        # Format to MySQL date format (YYYY-MM-DD)
+                                        transaction_date = f"'{parsed_date.strftime('%Y-%m-%d')}'"
+                                    else:
+                                        # If no format matches, try to extract just the date part
+                                        if len(date_str) >= 10:
+                                            # Extract first 10 characters if it looks like a date
+                                            date_part = date_str[:10]
+                                            if date_part.count('-') == 2:
+                                                # Validate the date format YYYY-MM-DD
+                                                try:
+                                                    datetime.strptime(date_part, "%Y-%m-%d")
+                                                    transaction_date = f"'{date_part}'"
+                                                except ValueError:
+                                                    transaction_date = 'NOW()'
+                                            else:
+                                                transaction_date = 'NOW()'
+                                        else:
+                                            transaction_date = 'NOW()'
+                                except Exception as e:
+                                    print(f"   -> Warning: Error parsing date '{periode_value}': {e}")
+                                    transaction_date = 'NOW()'
+
                         transaction_queries.append(
                             f"INSERT INTO account_transactions (account_id, balance, date, created_at, updated_at) VALUES "
                             f"((SELECT id FROM accounts WHERE account_number = '{rekening}'), "
-                            f"{current_balance}, '{date}', NOW(), NOW());"
+                            f"{current_balance}, {transaction_date}, NOW(), NOW());"
                         )
                     
-                    if transaction_queries:
-                        all_queries.append("\n".join(transaction_queries))
-                    else:
-                        all_queries.append("-- Tidak ada data untuk pembuatan Account Transactions")
-   
-                else:
-                    all_queries.append("-- Tidak bisa memvalidasi data karena kolom rekening tidak ditemukan")
-                    print(f"   -> Warning: Couldn't validate accounts due to missing rekening columns")
+                    valid_records += 1
+                    
+                except Exception as e:
+                    print(f"   -> Warning: Error processing row: {e}")
+                    skipped_records += 1
+                    continue
+            
+            print(f"   -> Valid records processed: {valid_records}")
+            print(f"   -> Skipped records: {skipped_records}")
+            print(f"   -> Unique clients: {len(processed_clients)}")
+            print(f"   -> Unique accounts: {len(processed_accounts)}")
+            
+            # Add queries to main list
+            if client_queries:
+                all_queries.append("\n".join(client_queries))
             else:
-                all_queries.append("-- Tidak bisa memproses data karena kolom RM tidak ditemukan")
-                print(f"   -> Warning: RM column '{self._col_source_rm}' not found")
+                all_queries.append("-- No client data to process")
+            
+            if account_queries:
+                all_queries.append("\n".join(account_queries))
+            else:
+                all_queries.append("-- No account data to process")
+            
+            if transaction_queries:
+                all_queries.append("\n".join(transaction_queries))
+            else:
+                all_queries.append("-- No transaction data to process")
 
-            print(f"[Tahap 7] Menyimpan output model ke file: {self.output_sql_file}")
+            print(f"[Tahap 5] Menyimpan output ke file: {self.output_sql_file}")
             with open(self.output_sql_file, 'w', encoding='utf-8') as f:
                 f.write("\n".join(all_queries))
             

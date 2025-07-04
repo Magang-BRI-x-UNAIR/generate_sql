@@ -2,10 +2,10 @@
 
 from model import SqlGeneratorModel
 
-SOURCE_DATA_FILE = 'DUMMY.xlsx'
-BASELINE_DATA_FILE = 'DUMMY ALL BASELINE.xlsx'
+SOURCE_DATA_FILE = 'Copy of DI319_MULTI_PN_2023091.xlsx'
+BASELINE_DATA_FILE = 'ALL BASELINE KELOLAAN APRIL 2025 - Copy.xlsx'
 print("Menginisialisasi SqlGeneratorModel...")
-model = SqlGeneratorModel(
+model = SqlGeneratorModel(    
     source_filepath=SOURCE_DATA_FILE,
     baseline_filepath=BASELINE_DATA_FILE
 )
