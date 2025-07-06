@@ -233,13 +233,12 @@ class SqlGeneratorModel:
             else:
                 print(f"   -> Warning: Product code column not found in source")
                 all_queries.append("-- Warning: Couldn't create account products due to missing column")
-
             print("[Tahap 4] Memproses data DI dengan validasi baseline...")
-            
+
             # Create baseline lookup for faster checking
             baseline_accounts = set()
             baseline_pn_mapping = {}
-            
+
             if self._col_baseline_rekening in df_baseline.columns and self._col_baseline_pn in df_baseline.columns:
                 for _, row in df_baseline.iterrows():
                     try:
@@ -250,33 +249,24 @@ class SqlGeneratorModel:
                             baseline_pn_mapping[rekening] = pn
                     except:
                         continue
-            
+
             print(f"   -> Baseline accounts loaded: {len(baseline_accounts)}")
-            
+
             # Process source data
             processed_clients = set()
             processed_accounts = set()
             client_queries = []
             account_queries = []
-            transaction_queries = []
-            
+
             all_queries.append("\n-- Blok 3: Membuat Clients (Nasabah) --")
             all_queries.append("\n-- Blok 4: Membuat Accounts (Rekening) --")
-            all_queries.append("\n-- Blok 5: Membuat Account Transactions --")
-            
+
             valid_records = 0
             skipped_records = 0
-            
+
             for _, row in df_source.iterrows():
                 try:
-                    # Check if pn_relationship_officer is not empty
-                    if self._col_source_rm in df_source.columns:
-                        pn_rm = self._clean_string(row[self._col_source_rm])
-                        if not pn_rm or pn_rm == '' or pn_rm == 'nan':
-                            skipped_records += 1
-                            continue
-                    
-                    # Get account number
+                    # Get account number first
                     if self._col_source_rekening not in df_source.columns:
                         skipped_records += 1
                         continue
@@ -286,17 +276,24 @@ class SqlGeneratorModel:
                         skipped_records += 1
                         continue
                     
-                    # Check if account exists in baseline
+                    # MAIN VALIDATION: Check if account exists in baseline
                     if rekening not in baseline_accounts:
                         skipped_records += 1
                         continue
                     
-                    # Get PN from baseline
+                    # Get PN from baseline mapping
                     baseline_pn = baseline_pn_mapping.get(rekening, '')
                     if baseline_pn not in valid_nips:
                         print(f"   -> Warning: PN {baseline_pn} for account {rekening} not in valid NIPs")
                         skipped_records += 1
                         continue
+                    
+                    # Check if pn_relationship_officer is not empty (optional check)
+                    if self._col_source_rm in df_source.columns:
+                        pn_rm = self._clean_string(row[self._col_source_rm])
+                        if not pn_rm or pn_rm == '' or pn_rm == 'nan':
+                            print(f"   -> Warning: Empty PN in source for account {rekening}")
+                            # Don't skip, continue with baseline PN
                     
                     # Get required fields
                     cif = self._clean_string(row[self._col_source_cif]) if self._col_source_cif in df_source.columns else ''
@@ -332,35 +329,29 @@ class SqlGeneratorModel:
                             f"(SELECT id FROM universal_bankers WHERE nip = '{baseline_pn}'), "
                             f"(SELECT id FROM account_products WHERE code = '{prod_code}'), "
                             f"'{rekening}', {current_balance}, {avail_balance}, '{currency}', 'active', NOW(), NOW(), NOW());"
-                        )                                           
-                    
+                        )                                                                
                     valid_records += 1
                     
                 except Exception as e:
                     print(f"   -> Warning: Error processing row: {e}")
                     skipped_records += 1
                     continue
-            
+
             print(f"   -> Valid records processed: {valid_records}")
             print(f"   -> Skipped records: {skipped_records}")
             print(f"   -> Unique clients: {len(processed_clients)}")
             print(f"   -> Unique accounts: {len(processed_accounts)}")
-            
+
             # Add queries to main list
             if client_queries:
                 all_queries.append("\n".join(client_queries))
             else:
                 all_queries.append("-- No client data to process")
-            
+
             if account_queries:
                 all_queries.append("\n".join(account_queries))
             else:
                 all_queries.append("-- No account data to process")
-            
-            if transaction_queries:
-                all_queries.append("\n".join(transaction_queries))
-            else:
-                all_queries.append("-- No transaction data to process")
 
             print(f"[Tahap 5] Menyimpan output ke file: {self.output_sql_file}")
             with open(self.output_sql_file, 'w', encoding='utf-8') as f:
